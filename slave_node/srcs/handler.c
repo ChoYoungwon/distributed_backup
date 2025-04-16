@@ -15,7 +15,7 @@ ssize_t read_exact(int sockfd, void *buffer, size_t length) {
     size_t total_read = 0;
     while (total_read < length) {
         ssize_t bytes = recv(sockfd, (char*)buffer + total_read, length - total_read, 0);
-        if (bytes <= 0) return -1;  // error or closed
+        if (bytes <= 0) return -1;
         total_read += bytes;
     }
     return total_read;
@@ -58,7 +58,7 @@ void send_file(int client_socket) {
     }
 
     fclose(fp);
-    printf("[+] Sent chunk %s (%u bytes)\n", chunk_id, chunk_size);
+    //printf("[+] Sent chunk %s (%u bytes)\n", chunk_id, chunk_size);
 }
 
 void receive_file(int client_socket) {
@@ -75,7 +75,7 @@ void receive_file(int client_socket) {
     }
     uint32_t chunk_size = ntohl(chunk_size_net);
 
-    mkdir("chunks", 0755);  // ensure directory exists
+    mkdir("chunks", 0755);
 
     char filepath[128];
     snprintf(filepath, sizeof(filepath), "chunks/%s", chunk_id);
@@ -97,7 +97,7 @@ void receive_file(int client_socket) {
     }
 
     fclose(fp);
-    printf("[+] Stored chunk %s (%u bytes)\n", chunk_id, chunk_size);
+    //printf("[+] Stored chunk %s (%u bytes)\n", chunk_id, chunk_size);
 }
 
 void handle_client(int client_socket) {

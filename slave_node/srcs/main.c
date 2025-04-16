@@ -6,10 +6,11 @@
 #include <netinet/tcp.h>
 #include <omp.h>
 
-#include "handler.h"  // handle_client() 정의되어 있어야 함
+#include "handler.h"
 
 #define PORT 9001
 #define MAX_CLIENTS 64
+#define MAX_THREADS 8
 
 int main() {
     int server_fd, client_fd;
@@ -43,15 +44,14 @@ int main() {
 
     printf("[*] Server listening on port %d\n", PORT);
 
-    // OpenMP 병렬 영역
-    #pragma omp parallel num_threads(4)  // 적당한 스레드 수로 설정
+    #pragma omp parallel num_threads(MAX_THREADS)
     {
         while (1) {
             int client_fd;
             struct sockaddr_in client_addr;
             socklen_t client_len = sizeof(client_addr);
 
-            #pragma omp critical  // accept는 동시에 호출되면 안 됨
+            #pragma omp critical
             {
                 client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
             }

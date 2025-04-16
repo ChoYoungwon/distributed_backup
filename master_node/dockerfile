@@ -30,12 +30,16 @@ FROM ubuntu:22.04 AS runtime
 RUN apt-get update && apt-get install -y \
     libssl-dev \
     libjansson-dev \
-    libgomp1
+    libgomp1 \
+    python3
 
 WORKDIR /usr/src/app
 
+COPY ./test_data/ .
 COPY --from=build /usr/src/app/store/store .
 COPY --from=build /usr/src/app/parrel_store/parrel_store .
 COPY --from=build /usr/src/app/restore/restore .
 COPY --from=build /usr/src/app/parrel_restore/parrel_restore .
-COPY ./test_data/ .
+COPY restore_benchmark.py .
+COPY store_benchmark.py .
+

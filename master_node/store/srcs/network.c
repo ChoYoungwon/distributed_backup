@@ -14,7 +14,7 @@ int open_all_connections() {
             fprintf(stderr, "[-] Failed to connect to node %s:%d\n", node_ips[i], node_ports[i]);
             return -1;
         } else {
-            printf("[+] Connected to node %s:%d (fd: %d)\n", node_ips[i], node_ports[i], sockfds[i]);
+            //printf("[+] Connected to node %s:%d (fd: %d)\n", node_ips[i], node_ports[i], sockfds[i]);
         }
     }
     return 0;

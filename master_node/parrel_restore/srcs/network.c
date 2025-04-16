@@ -5,9 +5,33 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include "network.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include "network.h"
+
+NodeConnection conns[64];
+int conn_count = 0;
+
+int find_or_open_connections(const char *ip, int port) {
+    for (int i = 0; i < conn_count; i++) {
+        if (strcmp(conns[i].ip, ip) == 0 && conns[i].port == port) {
+            return i;
+        }
+    }
+
+    int index = conn_count;
+    strncpy(conns[index].ip, ip, sizeof(conns[index].ip));
+    conns[index].port = port;
+
+    for (int t = 0; t < MAX_THREADS; t++) {
+        conns[index].sockfd[t] = open_restore_connection(ip, port);
+        if (conns[index].sockfd[t] < 0) {
+            fprintf(stderr, "[-] Failed to open connection to %s:%d for thread %d\n", ip, port, t);
+        }
+    }
+    conn_count++;
+    return index;
+}
 
 #define BUF_SIZE 4096
 
