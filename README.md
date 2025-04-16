@@ -159,7 +159,6 @@ docker cp master_node:/usr/src/app/restore_benchmark_results.csv ./restore_bench
 
 ### 결과 분석
 
-#### 파일 용량에 따른 분석
 ![alt text](<Efficiency for 1000KB File.png>)
 
   •	스레드 수 증가에 따른 속도 향상(Speedup) 은 4개까지 비교적 꾸준히 증가하며, 이 시점에서 가장 효율이 높습니다.
