@@ -1,0 +1,41 @@
+# ===== 빌드 스테이지 =====
+FROM ubuntu:22.04 AS build
+
+RUN apt-get update && apt-get install -y \
+    gcc \
+    make \
+    libssl-dev \
+    libjansson-dev \
+    libgomp1
+
+WORKDIR /usr/src/app
+
+COPY . .
+
+WORKDIR /usr/src/app/store
+RUN make
+
+WORKDIR /usr/src/app/restore
+RUN make
+
+WORKDIR /usr/src/app/parrel_store
+RUN make
+
+WORKDIR /usr/src/app/parrel_restore
+RUN make
+
+# ===== 실행 스테이지 =====
+FROM ubuntu:22.04 AS runtime
+
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    libjansson-dev \
+    libgomp1
+
+WORKDIR /usr/src/app
+
+COPY --from=build /usr/src/app/store/store .
+COPY --from=build /usr/src/app/parrel_store/parrel_store .
+COPY --from=build /usr/src/app/restore/restore .
+COPY --from=build /usr/src/app/parrel_restore/parrel_restore .
+COPY ./test_data/ .

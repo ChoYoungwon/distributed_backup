@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  master-node:
+    build: ./master_node
+    container_name: master_node
+    ports:
+      - "9000:9000"
+    networks:
+      - backupnet
+    tty: true
+    stdin_open: true
+
+  node1:
+    build: ./slave_node
+    container_name: node1
+    networks:
+      backupnet:
+        ipv4_address: 172.28.0.11
+    tty: true
+    stdin_open: true
+
+  node2:
+    build: ./slave_node
+    container_name: node2
+    networks:
+      backupnet:
+        ipv4_address: 172.28.0.12
+    tty: true
+    stdin_open: true
+
+  node3:
+    build: ./slave_node
+    container_name: node3
+    networks:
+      backupnet:
+        ipv4_address: 172.28.0.13
+    tty: true
+    stdin_open: true
+
+networks:
+  backupnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
