@@ -2,7 +2,7 @@
 #define CONFIG_H
 
 #define MAX_NODES 3
-#define MAX_THREADS 
+#define MAX_THREADS 4
 #define MIN_CHUNK_SIZE  (16 * 1024)
 #define AVG_CHUNK_SIZE  (64 * 1024)
 #define MAX_CHUNK_SIZE  (256 * 1024)
