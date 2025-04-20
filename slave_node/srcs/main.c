@@ -10,7 +10,7 @@
 
 #define PORT 9001
 #define MAX_CLIENTS 64
-#define MAX_THREADS 8
+#define MAX_THREADS 4
 
 int main() {
     int server_fd, client_fd;
