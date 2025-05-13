@@ -111,12 +111,12 @@ docker cp master_node:/usr/src/app/restore_benchmark_results.csv ./restore_bench
 ## 실험 결과
 
 ### 컬럼
-  •	threads: 사용한 OpenMP 쓰레드 수
-  •	file_size_mb: 실험에 사용된 파일 크기 (MB 단위)
-  •	serial_time: 직렬(Serial) 백업 수행 시간 (초)
-  •	parallel_time: 병렬(Parallel) 백업 수행 시간 (초)
-  •	speedup: 속도 향상 배수 (Speedup = Serial Time / Parallel Time)
-  •	efficiency: 병렬 효율성 (Efficiency = Speedup / Threads × 100%)
+- threads: 사용한 OpenMP 쓰레드 수
+- file_size_mb: 실험에 사용된 파일 크기 (MB 단위)
+- serial_time: 직렬(Serial) 백업 수행 시간 (초)
+- parallel_time: 병렬(Parallel) 백업 수행 시간 (초)
+- speedup: 속도 향상 배수 (Speedup = Serial Time / Parallel Time)
+- efficiency: 병렬 효율성 (Efficiency = Speedup / Threads × 100%)
 
 ### 분석표
 | **threads** | **file_size_mb** | **serial_time**   | **parallel_time** | **speedup**        | **efficiency**     |
