@@ -201,6 +201,6 @@ https://www.usenix.org/system/files/conference/atc16/atc16-paper-xia.pdf
 https://www.cs.cmu.edu/~15-749/READINGS/required/cas/tridgell96.pdf
 
 - 기술 자료
-•	Rabin Fingerprint: https://en.wikipedia.org/wiki/Rabin_fingerprint
-•	Chunking & Deduplication Diagram: https://www.researchgate.net/figure/Chunking-and-Deduplication-process_fig1_338252900
-•	MS Data Deduplication: https://learn.microsoft.com/en-us/windows-server/storage/data-deduplication/overview
+Rabin Fingerprint: https://en.wikipedia.org/wiki/Rabin_fingerprint
+Chunking & Deduplication Diagram: https://www.researchgate.net/figure/Chunking-and-Deduplication-process_fig1_338252900
+MS Data Deduplication: https://learn.microsoft.com/en-us/windows-server/storage/data-deduplication/overview
