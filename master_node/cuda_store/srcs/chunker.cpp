@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <iostream>
 #include <omp.h>
 #include <openssl/sha.h>
 #include <fcntl.h>
@@ -90,17 +91,33 @@ void finish_chunk_map() {
     }
 }
 
+// 파일 크기 확인
+long get_file_size(const char *filepath) {
+    struct stat st;
+    if(stat(filepath, &st) == 0) {
+        return st.st_size;
+    }
+    return -1;
+}
+
 void chunk_and_process(const char *filepath, const char *metadata_path) {
-    DS_timer timer(7);
+    DS_timer timer(6);
     timer.setTimerName(0, (char*)"File read");
     timer.setTimerName(1, (char*)"fingerprint");
     timer.setTimerName(2, (char*)"SHA-256");
     timer.setTimerName(3, (char*)"Write metadata");
     timer.setTimerName(4, (char*)"String formatting");
     timer.setTimerName(5, (char*)"Other Operation");
-    timer.setTimerName(6, (char*)"Total Time");
 
-    timer.onTimer(6);
+    struct stat st;
+    if (stat(filepath, &st) != 0) {
+        perror("stat failed");
+        return;
+    }
+
+    const long FILE_SIZE = st.st_size;
+    std::cout << "Total file size : " << FILE_SIZE << "bytes" << std::endl;
+
     FILE *fp = fopen(filepath, "rb");
     if (!fp) {
         perror("fopen failed");
@@ -214,6 +231,5 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
         fclose(map_fp);
     }
 
-    timer.offTimer(6);
     timer.printTimer();
 }

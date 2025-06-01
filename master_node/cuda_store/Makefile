@@ -1,4 +1,4 @@
-NAME			=	store
+NAME			=	cuda_store
 
 # flags
 OPMP = -fopenmp
@@ -16,7 +16,7 @@ INC_DIR			=	./includes
 
 # srcs
 # SRCS			=	$(SRC_DIR)chunker.c $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c
-SRCS			=	$(SRC_DIR)chunker.c $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c $(SRC_DIR)DS_timer.cpp
+SRCS			=	$(SRC_DIR)chunker.cpp $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c $(SRC_DIR)DS_timer.cpp
 OBJS			=	$(SRCS:.cpp=.o)
 
 all:	$(NAME)
