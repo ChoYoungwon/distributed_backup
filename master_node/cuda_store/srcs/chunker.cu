@@ -9,6 +9,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
 #include "chunker.h"
 #include "config.h"
 #include "network.h"
@@ -22,6 +25,7 @@
 #define WINDOW_SIZE     48
 #define CHUNK_REGION (512 * 1024)
 #define POLY            0x3DA3358B4DC173ULL
+#define NUM_STREAMS    4
 
 static uint64_t rabin_table[256];
 static uint64_t out_table[256];
@@ -101,27 +105,73 @@ long get_file_size(const char *filepath) {
 }
 
 void chunk_and_process(const char *filepath, const char *metadata_path) {
-    DS_timer timer(6);
-    timer.setTimerName(0, (char*)"File read");
-    timer.setTimerName(1, (char*)"fingerprint");
-    timer.setTimerName(2, (char*)"SHA-256");
-    timer.setTimerName(3, (char*)"Write metadata");
-    timer.setTimerName(4, (char*)"String formatting");
-    timer.setTimerName(5, (char*)"Other Operation");
-
     struct stat st;
     if (stat(filepath, &st) != 0) {
         perror("stat failed");
         return;
     }
-
-    const long FILE_SIZE = st.st_size;
+    const size_t FILE_SIZE = st.st_size;
     std::cout << "Total file size : " << FILE_SIZE << "bytes" << std::endl;
+    
+    cudaStream_t stream[NUM_STREAMS];
+    uint8_t *mapped_data[NUM_STREAMS]; 
+    uint8_t* pinned_mem[NUM_STREAMS]; 
+    uint8_t* dIn[NUM_STREAMS];
+    int fd[NUM_STREAMS];
 
-    FILE *fp = fopen(filepath, "rb");
-    if (!fp) {
-        perror("fopen failed");
-        return;
+    // 초기화
+    for (int i = 0; i < NUM_STREAMS; i++) {
+        mapped_data[i] = nullptr;
+        pinned_mem[i] = nullptr;
+        dIn[i] = nullptr;
+        fd[i] = -1;
+    }
+
+    size_t segment_size = FILE_SIZE / NUM_STREAMS;
+    for (int stream_id = 0; stream_id < NUM_STREAMS; ++stream_id) {
+        size_t offset = segment_size * stream_id;
+        size_t actual_size = (stream_id == NUM_STREAMS - 1) ? (FILE_SIZE - offset) : segment_size;
+    
+        fd[stream_id] = open(filepath, O_RDONLY);
+        if (fd[stream_id] == -1) {
+            perror("open failed");
+            return;
+        }
+        
+        mapped_data[stream_id]= (uint8_t*)mmap(NULL, actual_size, PROT_READ, 
+                                            MAP_PRIVATE, fd[stream_id], offset);
+        if (mapped_data[stream_id] == MAP_FAILED) {
+            perror("mmap failed");
+            close(fd[stream_id]);
+            return;
+        }
+
+        cudaMallocHost(&pinned_mem[stream_id], actual_size);        // pinned메모리에 적재
+        memcpy(pinned_mem[stream_id], mapped_data[stream_id], actual_size);
+        cudaMalloc(&dIn[stream_id], actual_size);
+
+        cudaStreamCreate(&stream[stream_id]);
+        cudaMemcpyAsync(dIn[stream_id], pinned_mem[stream_id], actual_size, cudaMemcpyHostToDevice, stream[stream_id]);
+
+        // + 커널 추가(스트림별 중첩해 파이프라인 형성)
+    }    
+
+    // 모든 스트림 동기화 (추가됨)
+    cudaDeviceSynchronize();
+
+    // 정리 
+    for (int i = 0; i < NUM_STREAMS; ++i) {
+        size_t cleanup_size = (i == NUM_STREAMS - 1) ? 
+                            (FILE_SIZE - (FILE_SIZE / NUM_STREAMS) * i) : 
+                            (FILE_SIZE / NUM_STREAMS);
+        
+        munmap(mapped_data[i], cleanup_size);
+        close(fd[i]);
+
+        cudaFreeHost(pinned_mem[i]);
+        cudaFree(dIn[i]);
+
+        cudaStreamDestroy(stream[i]);
     }
 
     // if (open_all_connections())
@@ -134,49 +184,30 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
 
     int byte;
     while (true) {
-        timer.onTimer(0);
-        byte = fgetc(fp); 
-        timer.offTimer(0);
-
-        if (byte == EOF) break;
-        
-        timer.onTimer(5);
         uint8_t b = (uint8_t)byte;
         chunk_buf[chunk_size++] = b;
-        timer.offTimer(5);
 
         if (chunk_size <= WINDOW_SIZE) {
-            timer.onTimer(5);
             slide_window[window_pos++ % WINDOW_SIZE] = b;
-            timer.offTimer(5);
             if (chunk_size == WINDOW_SIZE) {
-                timer.onTimer(1);
                 fingerprint = rabin_rolling_hash(slide_window, WINDOW_SIZE);
-                timer.offTimer(1);
             }
             continue;
         }
 
-        timer.onTimer(1);
         fingerprint = rabin_slide_hash(fingerprint, slide_window[window_pos % WINDOW_SIZE], b);
-        timer.offTimer(1);
 
-        timer.onTimer(5);
         slide_window[window_pos++ % WINDOW_SIZE] = b;
-        timer.offTimer(5);
+
 
         if ((fingerprint & CHUNK_MASK) == 0 || chunk_size >= MAX_CHUNK_SIZE) {
-            timer.onTimer(2);
             unsigned char sha[SHA256_DIGEST_LENGTH];
             SHA256(chunk_buf, chunk_size, sha);
-            timer.offTimer(2);
 
-            timer.onTimer(4);
             char chunk_id[65];
             for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
                 sprintf(chunk_id + i * 2, "%02x", sha[i]);
             chunk_id[64] = '\0';
-            timer.offTimer(4);
 
             const char *ip = node_ips[node_index];
             int port = node_ports[node_index];
@@ -187,25 +218,19 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
 
             // int sockfd = sockfds[target_index];
             // send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size);
-            timer.onTimer(3);
             write_chunk_map(chunk_id, node_ips[target_index], node_ports[target_index], metadata_path);
-            timer.offTimer(3);
             chunk_size = 0;
         }
     }
 
     if (chunk_size > 0) {
-        timer.onTimer(2);
         unsigned char sha[SHA256_DIGEST_LENGTH];
         SHA256(chunk_buf, chunk_size, sha);
-        timer.offTimer(2);
 
-        timer.onTimer(4);
         char chunk_id[65];
         for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
             sprintf(chunk_id + i * 2, "%02x", sha[i]);
         chunk_id[64] = '\0';
-        timer.offTimer(4);
 
         const char *ip = node_ips[node_index];
         int port = node_ports[node_index];
@@ -216,20 +241,22 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
 
         // int sockfd = sockfds[target_index];
         // send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size);
-        timer.onTimer(3);
         write_chunk_map(chunk_id, ip, port, metadata_path);
-        timer.offTimer(3);
     }
 
     finish_chunk_map();
     // close_all_connections();
     free(chunk_buf);
-    fclose(fp);
 
     if (map_fp) {
         fprintf(map_fp, "]\n");
         fclose(map_fp);
     }
 
-    timer.printTimer();
+    // 리소스 정리
+    for (int i = 0; i < NUM_STREAMS; i++) {
+        
+        cudaStreamDestroy(stream[i]);
+    }
+
 }
