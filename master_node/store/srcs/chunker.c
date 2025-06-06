@@ -12,11 +12,11 @@
 #include "config.h"
 #include "network.h"
 #include "timer.h"
-#include "DS_timer.h"
+// #include "DS_timer.h"
 
-#define MIN_CHUNK_SIZE  (16 * 1024)
-#define AVG_CHUNK_SIZE  (64 * 1024)
-#define MAX_CHUNK_SIZE  (256 * 1024)
+#define MIN_CHUNK_SIZE  (4 * 1024)
+#define AVG_CHUNK_SIZE  (16 * 1024)
+#define MAX_CHUNK_SIZE  (64 * 1024)
 #define CHUNK_MASK      (AVG_CHUNK_SIZE - 1)
 #define WINDOW_SIZE     48
 #define CHUNK_REGION (512 * 1024)
@@ -91,16 +91,16 @@ void finish_chunk_map() {
 }
 
 void chunk_and_process(const char *filepath, const char *metadata_path) {
-    DS_timer timer(7);
-    timer.setTimerName(0, (char*)"File read");
-    timer.setTimerName(1, (char*)"fingerprint");
-    timer.setTimerName(2, (char*)"SHA-256");
-    timer.setTimerName(3, (char*)"Write metadata");
-    timer.setTimerName(4, (char*)"String formatting");
-    timer.setTimerName(5, (char*)"Other Operation");
-    timer.setTimerName(6, (char*)"Total Time");
+    // DS_timer timer(7);
+    // timer.setTimerName(0, (char*)"File read");
+    // timer.setTimerName(1, (char*)"fingerprint");
+    // timer.setTimerName(2, (char*)"SHA-256");
+    // timer.setTimerName(3, (char*)"Write metadata");
+    // timer.setTimerName(4, (char*)"String formatting");
+    // timer.setTimerName(5, (char*)"Other Operation");
+    // timer.setTimerName(6, (char*)"Total Time");
 
-    timer.onTimer(6);
+    // timer.onTimer(6);
     FILE *fp = fopen(filepath, "rb");
     if (!fp) {
         perror("fopen failed");
@@ -116,50 +116,50 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     uint64_t fingerprint = 0;
 
     int byte;
-    while (true) {
-        timer.onTimer(0);
+    while (1) {
+        // timer.onTimer(0);
         byte = fgetc(fp); 
-        timer.offTimer(0);
+        // timer.offTimer(0);
 
         if (byte == EOF) break;
         
-        timer.onTimer(5);
+        // timer.onTimer(5);
         uint8_t b = (uint8_t)byte;
         chunk_buf[chunk_size++] = b;
-        timer.offTimer(5);
+        // timer.offTimer(5);
 
         if (chunk_size <= WINDOW_SIZE) {
-            timer.onTimer(5);
+            // timer.onTimer(5);
             slide_window[window_pos++ % WINDOW_SIZE] = b;
-            timer.offTimer(5);
+            // timer.offTimer(5);
             if (chunk_size == WINDOW_SIZE) {
-                timer.onTimer(1);
+                // timer.onTimer(1);
                 fingerprint = rabin_rolling_hash(slide_window, WINDOW_SIZE);
-                timer.offTimer(1);
+                // timer.offTimer(1);
             }
             continue;
         }
 
-        timer.onTimer(1);
+        // timer.onTimer(1);
         fingerprint = rabin_slide_hash(fingerprint, slide_window[window_pos % WINDOW_SIZE], b);
-        timer.offTimer(1);
+        // timer.offTimer(1);
 
-        timer.onTimer(5);
+        // timer.onTimer(5);
         slide_window[window_pos++ % WINDOW_SIZE] = b;
-        timer.offTimer(5);
+        // timer.offTimer(5);
 
         if ((fingerprint & CHUNK_MASK) == 0 || chunk_size >= MAX_CHUNK_SIZE) {
-            timer.onTimer(2);
+            // timer.onTimer(2);
             unsigned char sha[SHA256_DIGEST_LENGTH];
             SHA256(chunk_buf, chunk_size, sha);
-            timer.offTimer(2);
+            // timer.offTimer(2);
 
-            timer.onTimer(4);
+            // timer.onTimer(4);
             char chunk_id[65];
             for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
                 sprintf(chunk_id + i * 2, "%02x", sha[i]);
             chunk_id[64] = '\0';
-            timer.offTimer(4);
+            // timer.offTimer(4);
 
             const char *ip = node_ips[node_index];
             int port = node_ports[node_index];
@@ -170,25 +170,25 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
 
             // int sockfd = sockfds[target_index];
             // send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size);
-            timer.onTimer(3);
+            // timer.onTimer(3);
             write_chunk_map(chunk_id, node_ips[target_index], node_ports[target_index], metadata_path);
-            timer.offTimer(3);
+            // timer.offTimer(3);
             chunk_size = 0;
         }
     }
 
     if (chunk_size > 0) {
-        timer.onTimer(2);
+        // timer.onTimer(2);
         unsigned char sha[SHA256_DIGEST_LENGTH];
         SHA256(chunk_buf, chunk_size, sha);
-        timer.offTimer(2);
+        // timer.offTimer(2);
 
-        timer.onTimer(4);
+        // timer.onTimer(4);
         char chunk_id[65];
         for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
             sprintf(chunk_id + i * 2, "%02x", sha[i]);
         chunk_id[64] = '\0';
-        timer.offTimer(4);
+        // timer.offTimer(4);
 
         const char *ip = node_ips[node_index];
         int port = node_ports[node_index];
@@ -199,9 +199,9 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
 
         // int sockfd = sockfds[target_index];
         // send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size);
-        timer.onTimer(3);
+        // timer.onTimer(3);
         write_chunk_map(chunk_id, ip, port, metadata_path);
-        timer.offTimer(3);
+        // timer.offTimer(3);
     }
 
     finish_chunk_map();
@@ -214,6 +214,6 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
         fclose(map_fp);
     }
 
-    timer.offTimer(6);
-    timer.printTimer();
+    // timer.offTimer(6);
+    // timer.printTimer();
 }

@@ -16,10 +16,10 @@ int main(int argc, char *argv[]) {
     init_node_list(argc, argv);
     rabin_init_tables();
 
-    // timer_start(&t1);
+    timer_start(&t1);
     chunk_and_process(file_path, metadata_path);
-    // timer_end(&t1);
+    timer_end(&t1);
 
-    // timer_print(&t1, "Serial Code");
+    timer_print(&t1, "Cuda Code");
     return 0;
 }
