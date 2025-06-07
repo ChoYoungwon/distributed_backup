@@ -1,0 +1,67 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+#include "chunker.h"
+
+#define AVG_CHUNK_SIZE  (64 * 1024)
+#define MAX_CHUNK_SIZE  (256 * 1024)
+#define CHUNK_MASK      (AVG_CHUNK_SIZE - 1)
+#define WINDOW_SIZE     48
+#define THREADS_PER_BLOCK 256
+
+extern void load_rabin_tables(uint64_t *table); // Load CPU Rabin table for cudaMemcpyToSymbol
+
+void chunk_and_process_cuda(const char *filepath, const char *metadata_path) {
+    FILE *fp = fopen(filepath, "rb");
+    if (!fp) {
+        perror("fopen");
+        return;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    size_t filesize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    uint8_t *h_input = malloc(filesize);
+    fread(h_input, 1, filesize, fp);
+    fclose(fp);
+
+    uint8_t *d_input;
+    uint64_t *d_fps, *h_fps;
+    h_fps = (uint64_t*)malloc((filesize - WINDOW_SIZE + 1) * sizeof(uint64_t));
+
+    cudaMalloc(&d_input, filesize);
+    cudaMemcpy(d_input, h_input, filesize, cudaMemcpyHostToDevice);
+
+    cudaMalloc(&d_fps, (filesize - WINDOW_SIZE + 1) * sizeof(uint64_t));
+
+    uint64_t rabin_table[256];
+    load_rabin_tables(rabin_table);
+    cudaMemcpyToSymbol(d_rabin_table, rabin_table, sizeof(rabin_table));
+
+    int blocks = (filesize - WINDOW_SIZE + THREADS_PER_BLOCK) / THREADS_PER_BLOCK;
+    fingerprint_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_input, d_fps, filesize);
+
+    cudaMemcpy(h_fps, d_fps, (filesize - WINDOW_SIZE + 1) * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+
+    // CPU: chunk detection based on fingerprint
+    uint8_t *chunk_buf = malloc(MAX_CHUNK_SIZE);
+    size_t chunk_start = 0;
+
+    for (size_t i = 0; i < filesize - WINDOW_SIZE + 1; i++) {
+        if (((h_fps[i] & CHUNK_MASK) == 0) || (i - chunk_start >= MAX_CHUNK_SIZE)) {
+            size_t chunk_size = i + WINDOW_SIZE - chunk_start;
+            process_chunk(chunk_buf, &h_input[chunk_start], chunk_size, metadata_path);
+            chunk_start = i + WINDOW_SIZE;
+        }
+    }
+
+    if (chunk_start < filesize) {
+        size_t final_size = filesize - chunk_start;
+        process_chunk(chunk_buf, &h_input[chunk_start], final_size, metadata_path);
+    }
+
+    free(h_input); free(h_fps); free(chunk_buf);
+    cudaFree(d_input); cudaFree(d_fps);
+}
