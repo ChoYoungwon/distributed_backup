@@ -61,7 +61,7 @@ docker exec -it master_node /bin/bash
 ### 3. 데이터를 저장합니다
 •	직렬 저장 (Serial Store)
 ```bash
-./store data_1000.bin serial_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
+./store data.bin serial_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
 ```
 •	병렬 저장 (Parallel Store)
 ```bash
