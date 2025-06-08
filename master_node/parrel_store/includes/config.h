@@ -3,9 +3,13 @@
 
 #define MAX_NODES 3
 #define MAX_THREADS 4
-#define MIN_CHUNK_SIZE  (16 * 1024)
-#define AVG_CHUNK_SIZE  (64 * 1024)
-#define MAX_CHUNK_SIZE  (256 * 1024)
+// 이전 내용
+//#define MIN_CHUNK_SIZE  (16 * 1024)
+//#define AVG_CHUNK_SIZE  (64 * 1024)
+//#define MAX_CHUNK_SIZE  (256 * 1024)
+#define MIN_CHUNK_SIZE          (4 * 1024)
+#define AVG_CHUNK_SIZE          (16 * 1024)
+#define MAX_CHUNK_SIZE          (64 * 1024)
 #define CHUNK_MASK      (AVG_CHUNK_SIZE - 1)
 #define WINDOW_SIZE     48
 #define CHUNK_REGION (512 * 1024)

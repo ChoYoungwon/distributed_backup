@@ -1,5 +1,4 @@
-# 이름
-NAME            =   parrel_store
+NAME            =   cuda_store
 
 # flags
 OPMP            =   -fopenmp
@@ -16,8 +15,8 @@ SRC_DIR         =   srcs/
 INC_DIR         =   ./includes
 
 # 소스 파일
-C_SRCS          =   $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c $(SRC_DIR)chunker.c
-CU_SRCS         =   $(SRC_DIR)rabin.cu
+C_SRCS          =   $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c
+CU_SRCS         =   $(SRC_DIR)chunker.cu
 C_OBJS          =   $(C_SRCS:.c=.o)
 CU_OBJS         =   $(CU_SRCS:.cu=.o)
 
@@ -31,10 +30,10 @@ $(SRC_DIR)%.o: $(SRC_DIR)%.c
 	$(CC) $(OPMP) -c $< -o $@ -I $(INC_DIR) $(SHA) $(JSON)
 
 $(SRC_DIR)%.o: $(SRC_DIR)%.cu
-	$(NVCC) -c $< -o $@ -I $(INC_DIR) -Xcompiler "$(OPMP)" $(SHA) $(JSON)
+	$(NVCC) -c $< -o $@ -I $(INC_DIR) -Xcompiler "$(OPMP)"
 
 $(NAME): $(OBJS)
-	$(CC) $(OPMP) -o $@ $^ -I $(INC_DIR) $(SHA) $(JSON) -L/usr/local/cuda/lib64 -lcudart
+	$(NVCC) -o $@ $^ -Xcompiler "$(OPMP)" -I $(INC_DIR) $(SHA) $(JSON) -lcudart
 
 clean:
 	$(RM) $(C_OBJS) $(CU_OBJS)

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include "network.h"
 #include "config.h"
@@ -61,19 +62,33 @@ void close_connection(int sockfd) {
 }
 
 int send_chunk_over_connection(int sockfd, const char *chunk_id, const uint8_t *data, size_t size) {
-    if (send(sockfd, "PUT\0", 4, 0) != 4) 
+    if (send(sockfd, "PUT\0", 4, 0) != 4) {
+        int err = errno;
+        fprintf(stderr, "Send failed 1: %s\n", strerror(err));
         return -1;
-    if (send(sockfd, chunk_id, 64, 0) != 64)
+    }
+    if (send(sockfd, chunk_id, 64, 0) != 64) {
+        int err = errno;
+        fprintf(stderr, "Send failed 2: %s\n", strerror(err));
         return -1;
+    }
 
     uint32_t chunk_size = htonl((uint32_t)size);
-    if (send(sockfd, &chunk_size, sizeof(chunk_size), 0) != sizeof(chunk_size))
+    if (send(sockfd, &chunk_size, sizeof(chunk_size), 0) != sizeof(chunk_size)) {
+        int err = errno;
+        fprintf(stderr, "Send failed 3: %s\n", strerror(err));
         return -1;
+    }
     size_t sent = 0;
     while (sent < size) {
         ssize_t n = send(sockfd, data + sent, size - sent, 0);
-        if (n <= 0) return -1;
-            sent += n;
+        int err = errno;
+        if (n <= 0) {
+            
+            fprintf(stderr, "Send failed 4: %s\n", strerror(err));
+            return -1;
+        }
+        sent += n;
     }
 
     return (sent == size) ? 0 : -1;

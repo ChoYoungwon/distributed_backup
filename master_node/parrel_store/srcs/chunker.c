@@ -212,7 +212,7 @@ void parrel_chunk_and_process(const char *filepath, const char *metadata_path) {
     }
 
     parrel_finish_chunk_map(metadata_path);
-    close_all_connections();
+    close_all_connections(MAX_THREADS);
     munmap(file_data, file_size);
     close(fd);
 }

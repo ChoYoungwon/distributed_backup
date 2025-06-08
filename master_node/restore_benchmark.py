@@ -30,32 +30,40 @@ def compare_files(original, restored):
         return False
 
 def benchmark():
-    sizes = [100, 500, 1000, 2000, 3000]
+    sizes = [100, 500, 1000, 2000, 3000, 5000]
 
     results = []
 
     for size in sizes:
         print(f"\n=== [TEST] File Size: {size}MB ===")
         original = f"data_{size}.bin"
-        serial_map = f"serial_chunk_map_{size}.json"
+        #serial_map = f"serial_chunk_map_{size}.json"
         parrel_map = f"parrel_chunk_map_{size}.json"
-        serial_out = f"serial_restored_{size}.bin"
+        cuda_map = f"cuda_chunk_map_{size}.json"
+        #serial_out = f"serial_restored_{size}.bin"
         parrel_out = f"parrel_restored_{size}.bin"
+        cuda_out = f"cuda_restored_{size}.bin"
 
         # Serial Restore
-        t1 = run_and_time(["./restore", serial_map, serial_out])
-        ok1 = compare_files(original, serial_out)
+        #t1 = run_and_time(["./restore", serial_map, serial_out])
+        #ok1 = compare_files(original, serial_out)
 
         # Parallel Restore
         t2 = run_and_time(["./parrel_restore", parrel_map, parrel_out])
         ok2 = compare_files(original, parrel_out)
 
+        # Cuda Restore
+        t3 = run_and_time(["./cuda_restore", cuda_map, cuda_out])
+        ok3 = compare_files(original, cuda_out)
+
         results.append({
             "file_size_kb": size,
-            "serial_restore_time": t1,
-            "serial_success": ok1,
+            #"serial_restore_time": t1,
+            #"serial_success": ok1,
             "parrel_restore_time": t2,
             "parrel_success": ok2,
+            "cuda_restore_time": t3,
+            "cuda_success": ok3,
         })
 
     # Save to CSV

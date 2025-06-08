@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include "chunker.h"
-#include "rabin.h"
 #include "config.h"
 #include "timer.h"
 
@@ -17,7 +16,7 @@ int main(int argc, char *argv[]) {
     rabin_init_tables();
 
     timer_start(&t1);
-    parrel_chunk_and_process(file_path, metadata_path);
+    chunk_and_process(file_path, metadata_path);
     timer_end(&t1);
 
     timer_print(&t1, "Parallel Code");
