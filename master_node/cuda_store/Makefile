@@ -1,36 +1,47 @@
-NAME			=	parrel_store
+# 이름
+NAME            =   parrel_store
 
 # flags
-OPMP = -fopenmp
-SHA = -lcrypto
-JSON = -ljansson
+OPMP            =   -fopenmp
+SHA             =   -lcrypto
+JSON            =   -ljansson
 
-# command
-CC				=	gcc
-RM				=	rm -rf
+# 컴파일러
+CC              =   gcc
+NVCC            =   nvcc
+RM              =   rm -rf
 
-# directory
-SRC_DIR			=	srcs/
-INC_DIR			=	./includes
+# 디렉터리
+SRC_DIR         =   srcs/
+INC_DIR         =   ./includes
 
-# srcs
-SRCS			=	$(SRC_DIR)chunker.c $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c
-OBJS			=	$(SRCS:.cpp=.o)
+# 소스 파일
+C_SRCS          =   $(SRC_DIR)config.c $(SRC_DIR)main.c $(SRC_DIR)network.c $(SRC_DIR)timer.c $(SRC_DIR)chunker.c
+CU_SRCS         =   $(SRC_DIR)rabin.cu
+C_OBJS          =   $(C_SRCS:.c=.o)
+CU_OBJS         =   $(CU_SRCS:.cu=.o)
 
-all:	$(NAME)
+# 전체 대상
+OBJS            =   $(C_OBJS) $(CU_OBJS)
 
-.cpp.o: 
+# 규칙
+all: $(NAME)
+
+$(SRC_DIR)%.o: $(SRC_DIR)%.c
 	$(CC) $(OPMP) -c $< -o $@ -I $(INC_DIR) $(SHA) $(JSON)
 
+$(SRC_DIR)%.o: $(SRC_DIR)%.cu
+	$(NVCC) -c $< -o $@ -I $(INC_DIR) -Xcompiler "$(OPMP)" $(SHA) $(JSON)
+
 $(NAME): $(OBJS)
-	$(CC) $(OPMP) -o $(NAME) $(OBJS) -I $(INC_DIR) $(SHA) $(JSON)
+	$(CC) $(OPMP) -o $@ $^ -I $(INC_DIR) $(SHA) $(JSON) -L/usr/local/cuda/lib64 -lcudart
 
 clean:
-	rm -f $(OBJS) ./srcs/$(NAME)
+	$(RM) $(C_OBJS) $(CU_OBJS)
 
 fclean: clean
 	$(RM) $(NAME)
 
-re:	fclean all
+re: fclean all
 
 .PHONY: all clean fclean re
