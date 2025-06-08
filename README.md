@@ -61,11 +61,15 @@ docker exec -it master_node /bin/bash
 ### 3. 데이터를 저장합니다
 •	직렬 저장 (Serial Store)
 ```bash
-./store data_1000.bin serial_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
+./store data.bin serial_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
 ```
-•	병렬 저장 (Parallel Store)
+•	병렬 cpu 저장 (Parallel Store)
 ```bash
-./parrel_store data_1000.bin parrel_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
+./parrel_store data.bin parrel_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
+```
+•	병렬 gpu 저장 (Parallel Store GPU)
+```bash
+./cuda_store data.bin cuda_chunk_map.json 172.28.0.11 9001 172.28.0.12 9001 172.28.0.13 9001
 ```
 
 ### 4. 데이터를 복원합니다
@@ -77,11 +81,17 @@ docker exec -it master_node /bin/bash
 ```bash
 ./parrel_restore parrel_chunk_map.json parrel_restored_data.bin
 ```
+•	병렬 gpu 복원 (Parallel Restore gpu)
+```bash
+./parrel_restore cuda_chunk_map.json cuda_restored_data.bin
+```
+
 
 ### 5. 복원 검증을 수행합니다
 ```bash
-diff data_1000.bin serial_restored_data.bin && echo "Serial Restore successful!" || echo "Serial Restore failed!"
-diff data_1000.bin parrel_restored_data.bin && echo "Parallel Restore successful!" || echo "Parallel Restore failed!"
+diff data.bin serial_restored_data.bin && echo "Serial Restore successful!" || echo "Serial Restore failed!"
+diff data.bin parrel_restored_data.bin && echo "Parallel Restore successful!" || echo "Parallel Restore failed!"
+diff data.bin cuda_restored_data.bin && echo "Cuda Restore successful!" || echo "Cuda Restore failed!"
 ```
 
 ## 벤치마크 실행 방법

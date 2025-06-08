@@ -1,5 +1,5 @@
 # ===== 빌드 스테이지 =====
-FROM ubuntu:22.04 AS build
+FROM nvidia/cuda:12.3.2-devel-ubuntu22.04 AS build
 
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -24,8 +24,11 @@ RUN make
 WORKDIR /usr/src/app/parrel_restore
 RUN make
 
+WORKDIR /usr/src/app/cuda_store
+RUN make
+
 # ===== 실행 스테이지 =====
-FROM ubuntu:22.04 AS runtime
+FROM nvidia/cuda:12.3.2-runtime-ubuntu22.04 AS runtime
 
 RUN apt-get update && apt-get install -y \
     libssl-dev \
@@ -40,6 +43,14 @@ COPY --from=build /usr/src/app/store/store .
 COPY --from=build /usr/src/app/parrel_store/parrel_store .
 COPY --from=build /usr/src/app/restore/restore .
 COPY --from=build /usr/src/app/parrel_restore/parrel_restore .
+COPY --from=build /usr/src/app/cuda_store/cuda_store .
 COPY restore_benchmark.py .
 COPY store_benchmark.py .
 
+RUN dd if=/dev/urandom of=data_100.bin bs=1M count=100 && \
+    dd if=/dev/urandom of=data_500.bin bs=1M count=500 && \
+    dd if=/dev/urandom of=data_1000.bin bs=1M count=1000 && \
+    dd if=/dev/urandom of=data_2000.bin bs=1M count=2000 && \
+    dd if=/dev/urandom of=data_3000.bin bs=1M count=3000 && \
+    dd if=/dev/urandom of=data_5000.bin bs=1M count=5000 && \
+    dd if=/dev/urandom of=data_10000.bin bs=1M count=10000
