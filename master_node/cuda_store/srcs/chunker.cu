@@ -32,11 +32,11 @@
 #define NUM_STREAMS             4
 #define THREADS_PER_BLOCK       256
 #define NUM_BLOCKS              16
-#define MAX_CHUNKS_PER_THREAD   4
+#define MAX_CHUNKS_PER_THREAD   8
 #define SHARED_BUFFER_SIZE      (32 * 1024) // 공유 버퍼 크기
 #define MAX_CHUNKS_PER_STREAM   (NUM_BLOCKS * THREADS_PER_BLOCK * MAX_CHUNKS_PER_THREAD)
 
-// ✅ 올바른 메모리 할당 크기 계산
+// 메모리 할당 크기 계산
 #define TOTAL_THREADS_PER_STREAM    (NUM_BLOCKS * THREADS_PER_BLOCK)
 #define CHUNKS_PER_STREAM          (TOTAL_THREADS_PER_STREAM * MAX_CHUNKS_PER_THREAD)
 #define TOTAL_CHUNKS               (NUM_STREAMS * CHUNKS_PER_STREAM)
@@ -116,7 +116,7 @@ long get_file_size(const char *filepath) {
     return -1;
 }
 
-// 🚀 최적화 3: 더 빠른 SHA256 계산 (인라인 최적화)
+// 더 빠른 SHA256 계산 (인라인 최적화)
 __device__ __forceinline__ void calculate_sha256_device(uint8_t* data, size_t size, BYTE* hash) {
     CUDA_SHA256_CTX ctx;
     cuda_sha256_init(&ctx);
@@ -167,35 +167,30 @@ __device__ __forceinline__ void create_chunk_optimized(uint8_t* file_data, size_
 __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t global_offset, 
                                    ChunkResult* chunk_results) {
     
-    __shared__ int shared_chunk_count;
-    
     int thread_id = blockDim.x * blockIdx.x + threadIdx.x;
     int local_thread_id = threadIdx.x;
     
-    if (local_thread_id == 0) {
-        shared_chunk_count = 0;
-    }
     __syncthreads();
 
     if (thread_id >= TOTAL_THREADS_PER_STREAM) return;
 
     size_t total_threads = gridDim.x * blockDim.x;
-    size_t chunk_per_thread = (data_size + total_threads - 1) / total_threads;
+    size_t chunk_per_thread = (data_size + total_threads - 1) / total_threads;      // 올림 나눗셈
     size_t thread_start = thread_id * chunk_per_thread;
     size_t thread_end = min(thread_start + chunk_per_thread, data_size);
 
     if (thread_start >= data_size) return;
 
     // 🔧 수정: Rabin 윈도우 초기화 개선
-    uint8_t slide_window[WINDOW_SIZE];
-    memset(slide_window, 0, WINDOW_SIZE);
+    __shared__ uint8_t slide_window[THREADS_PER_BLOCK][WINDOW_SIZE];
+    memset(&slide_window[local_thread_id][0], 0, WINDOW_SIZE);
     
     size_t current_chunk_start = thread_start;
     size_t current_pos = thread_start;
     uint64_t fingerprint = 0;
     int local_chunk_count = 0;
     
-    while (current_pos < thread_end && local_chunk_count < MAX_CHUNKS_PER_THREAD) {
+    while (current_pos < thread_end) {
         size_t chunk_size = 0;
         current_chunk_start = current_pos;
         
@@ -210,12 +205,12 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
             
             // 슬라이딩 윈도우 업데이트
             if (chunk_size <= WINDOW_SIZE) {
-                slide_window[chunk_size - 1] = b;
+                slide_window[local_thread_id][chunk_size - 1] = b;
                 if (chunk_size == WINDOW_SIZE) {
                     // 🔧 수정: 정확한 초기 핑거프린트 계산
                     fingerprint = 0;
                     for (int i = 0; i < WINDOW_SIZE; i++) {
-                        fingerprint = (fingerprint << 8) ^ d_rabin_table[(fingerprint >> 56) ^ slide_window[i]];
+                        fingerprint = (fingerprint << 8) ^ d_rabin_table[(fingerprint >> 56) ^ slide_window[local_thread_id][i]];
                     }
                     window_ready = true;
                     window_pos = WINDOW_SIZE;
@@ -223,8 +218,8 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
             } else {
                 // 🔧 수정: 정확한 슬라이딩 윈도우 계산
                 if (window_ready) {
-                    uint8_t out_byte = slide_window[window_pos % WINDOW_SIZE];
-                    slide_window[window_pos % WINDOW_SIZE] = b;
+                    uint8_t out_byte = slide_window[local_thread_id][window_pos % WINDOW_SIZE];
+                    slide_window[local_thread_id][window_pos % WINDOW_SIZE] = b;
                     
                     // 정확한 슬라이딩 해시 계산
                     fingerprint ^= d_out_table[out_byte];
@@ -234,19 +229,27 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
                 }
             }
 
-            // 🔧 수정: 청크 경계 조건 개선
+            // 청크 경계
             if (window_ready && chunk_size >= MIN_CHUNK_SIZE) {
                 // 자연적 경계 조건 확인
                 bool natural_boundary = ((fingerprint & CHUNK_MASK) == 0);
                 
-                // 🔧 추가: 더 나은 경계 조건들
+                // 경계 조건 추가 
                 bool size_boundary = (chunk_size >= AVG_CHUNK_SIZE && (fingerprint & (CHUNK_MASK >> 1)) == 0);
                 bool force_split = (chunk_size >= MAX_CHUNK_SIZE);
                 
-                if (natural_boundary || size_boundary || force_split) {
+                bool last_chunk_slot = (local_chunk_count >= MAX_CHUNKS_PER_THREAD - 1);
+                bool end_of_data = (current_pos >= thread_end);
+
+                if (natural_boundary || size_boundary || force_split || (last_chunk_slot && !end_of_data)) {
                     break;
                 }
             }
+        }
+
+        if (local_chunk_count >= MAX_CHUNKS_PER_THREAD - 1 && current_pos < thread_end) {
+            chunk_size = thread_end - current_chunk_start;
+            current_pos = thread_end;
         }
 
         // 청크 생성
@@ -261,13 +264,6 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
             }
         }
     }
-
-    // 카운터 업데이트
-    if (local_chunk_count > 0) {
-        atomicAdd(&shared_chunk_count, local_chunk_count);
-    }
-    
-    __syncthreads();
 }
 
 void chunk_and_process(const char *filepath, const char *metadata_path) {
@@ -298,7 +294,7 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
         return;
     }
 
-    // 🔥 더블 버퍼링을 위한 자원 준비
+    // 더블 버퍼링을 위한 자원 준비
     const int BUFFER_COUNT = 2;  // 더블 버퍼링
     int current_buffer = 0;
 
@@ -329,11 +325,16 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
         int read_seg_id = seg_id;
         int process_seg_id = seg_id - BUFFER_COUNT + 1;
 
+        // 세그먼트 오프셋
+        size_t segment_offsets[NUM_STREAMS];
+
         if (read_seg_id < NUM_STREAMS) {
             size_t offset = SEGMENT_SIZE * read_seg_id;
             size_t segment_size = (read_seg_id == NUM_STREAMS - 1) ?
                 (FILE_SIZE - offset) : SEGMENT_SIZE;
             
+            segment_offsets[read_seg_id] = offset;
+
             // 비동기 파일 읽기 시뮬레이션 (실제로는 동기식이지만 GPU 작업과 오버랩)
             lseek(fd, offset, SEEK_SET);
             size_t total_read = 0;
@@ -379,6 +380,8 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
             
             // 이전 버퍼의 GPU 작업이 완료될 때까지 대기
             cudaEventSynchronize(events[process_buffer]);
+
+            size_t current_segment_offset = segment_offsets[process_seg_id];
             
             // 결과 수집 (CPU 작업, 다음 GPU 작업과 오버랩)
             for (int i = 0; i < CHUNKS_PER_STREAM; i++) {
@@ -386,8 +389,26 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                     h_chunk_results[process_buffer][i].size > 0) {
                     all_chunk_results.push_back(h_chunk_results[process_buffer][i]);
                     
-                    const char* ip = "127.0.0.1";
-                    int port = 8080 + (process_seg_id % 4);
+                    const char* ip = node_ips[node_index];
+                    int port = node_ports[node_index];
+                    // char * chunk_id = h_chunk_results[process_buffer][i].chunk_id;
+                    // int chunk_size = h_chunk_results[process_buffer][i].size;
+
+                    // size_t global_offset = h_chunk_results[process_buffer][i].offset;
+                    // size_t local_offset = global_offset - current_segment_offset;
+                    // uint8_t* chunk_buf = h_pinned_buffers[process_buffer] + local_offset;
+
+                    // printf("[+] Sending final chunk %s (size: %zu bytes) to %s:%d\n", 
+                    //     chunk_id, 
+                    //     chunk_size, 
+                    //     ip, port
+                    // );
+                    // int target_index = node_index;
+                    // node_index = (node_index + 1) % node_count;
+
+                    // int sockfd = sockfds[target_index];
+                    // send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size);
+
                     write_chunk_map(h_chunk_results[process_buffer][i].chunk_id, 
                                   ip, port, metadata_path);
                 }
