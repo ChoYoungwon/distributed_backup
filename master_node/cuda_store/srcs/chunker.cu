@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <vector>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -164,7 +165,7 @@ __device__ __forceinline__ void create_chunk_optimized(uint8_t* file_data, size_
 }
 
 __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t global_offset, 
-                                   ChunkResult* chunk_results, int* chunk_count_per_block) {
+                                   ChunkResult* chunk_results) {
     
     __shared__ int shared_chunk_count;
     
@@ -267,21 +268,13 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
     }
     
     __syncthreads();
-    
-    if (local_thread_id == 0 && shared_chunk_count > 0) {
-        atomicAdd(&chunk_count_per_block[blockIdx.x], shared_chunk_count);
-    }
 }
 
 void chunk_and_process(const char *filepath, const char *metadata_path) {
-    cudaEvent_t start, stop, kernel_start, kernel_stop, memcpy_start, memcpy_stop;
+    cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    cudaEventCreate(&kernel_start);
-    cudaEventCreate(&kernel_stop);
-    cudaEventCreate(&memcpy_start);
-    cudaEventCreate(&memcpy_stop);
-    
+    cudaEventRecord(start);
     cudaEventRecord(start);
     
     rabin_init_tables();
@@ -295,159 +288,141 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     const size_t FILE_SIZE = st.st_size;
     const size_t SEGMENT_SIZE = FILE_SIZE / NUM_STREAMS;
     
-    std::cout << "=== 성능 진단 정보 ===" << std::endl;
+    std::cout << "=== 파이프라인 스트리밍 처리 ===" << std::endl;
     std::cout << "파일 크기: " << FILE_SIZE / (1024*1024) << " MB" << std::endl;
-    std::cout << "스트림당 처리량: " << SEGMENT_SIZE / (1024*1024) << " MB" << std::endl;
-    std::cout << "예상 청크 수: " << FILE_SIZE / AVG_CHUNK_SIZE << std::endl;
+    std::cout << "세그먼트 크기: " << SEGMENT_SIZE / (1024*1024) << " MB" << std::endl;
     
-    // 메모리 맵핑
     int fd = open(filepath, O_RDONLY);
-    uint8_t* mapped_file = (uint8_t*)mmap(NULL, FILE_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (fd == -1) {
+        perror("open failed");
+        return;
+    }
+
+    // 🔥 더블 버퍼링을 위한 자원 준비
+    const int BUFFER_COUNT = 2;  // 더블 버퍼링
+    int current_buffer = 0;
+
+    // 각 버퍼를 위한 리소스
+    uint8_t* h_pinned_buffers[BUFFER_COUNT];
+    uint8_t* d_segment_buffers[BUFFER_COUNT];
+    ChunkResult* d_chunk_results[BUFFER_COUNT];
+    ChunkResult* h_chunk_results[BUFFER_COUNT];
+    cudaStream_t streams[BUFFER_COUNT];
+    cudaEvent_t events[BUFFER_COUNT];
     
-    // GPU 메모리 할당
-    uint8_t* d_file_data;
-    ChunkResult* d_chunk_results;
-    int* d_chunk_counts;
-    
-    const size_t TOTAL_CHUNKS_NEEDED = NUM_STREAMS * CHUNKS_PER_STREAM;
-    const size_t TOTAL_BLOCKS_NEEDED = NUM_STREAMS * NUM_BLOCKS;
-    
-    cudaMalloc(&d_file_data, FILE_SIZE);
-    cudaMalloc(&d_chunk_results, sizeof(ChunkResult) * TOTAL_CHUNKS_NEEDED);
-    cudaMalloc(&d_chunk_counts, sizeof(int) * TOTAL_BLOCKS_NEEDED);
-    
-    ChunkResult* h_chunk_results = (ChunkResult*)malloc(sizeof(ChunkResult) * TOTAL_CHUNKS_NEEDED);
-    int* h_chunk_counts = (int*)calloc(TOTAL_BLOCKS_NEEDED, sizeof(int));
-    
-    cudaStream_t streams[NUM_STREAMS];
-    for (int i = 0; i < NUM_STREAMS; ++i) {
+    // 버퍼 초기화
+    for (int i = 0; i < BUFFER_COUNT; i++) {
+        size_t max_segment_size = SEGMENT_SIZE + (FILE_SIZE % NUM_STREAMS);
+        
+        cudaMallocHost(&h_pinned_buffers[i], max_segment_size);
+        cudaMalloc(&d_segment_buffers[i], max_segment_size);
+        cudaMalloc(&d_chunk_results[i], sizeof(ChunkResult) * CHUNKS_PER_STREAM);
+        cudaMallocHost(&h_chunk_results[i], sizeof(ChunkResult) * CHUNKS_PER_STREAM);
+        
         cudaStreamCreate(&streams[i]);
+        cudaEventCreate(&events[i]);
     }
     
-    // 🔍 메모리 복사 시간 측정
-    cudaEventRecord(memcpy_start);
-    for (int i = 0; i < NUM_STREAMS; ++i) {
-        size_t offset = SEGMENT_SIZE * i;
-        size_t size = (i == NUM_STREAMS - 1) ? (FILE_SIZE - offset) : SEGMENT_SIZE;
-        
-        cudaMemcpyAsync(d_file_data + offset, mapped_file + offset, size, 
-                       cudaMemcpyHostToDevice, streams[i]);
-    }
-    cudaDeviceSynchronize();
-    cudaEventRecord(memcpy_stop);
-    
-    // 🔍 커널 실행 시간 측정
-    cudaEventRecord(kernel_start);
-    for (int i = 0; i < NUM_STREAMS; ++i) {
-        size_t offset = SEGMENT_SIZE * i;
-        size_t size = (i == NUM_STREAMS - 1) ? (FILE_SIZE - offset) : SEGMENT_SIZE;
-        
-        dim3 blockDim(THREADS_PER_BLOCK);
-        dim3 gridDim(NUM_BLOCKS);
-        
-        size_t chunk_result_offset = i * CHUNKS_PER_STREAM;
-        size_t chunk_count_offset = i * NUM_BLOCKS;
-        
-        rabin_kernel_fixed<<<gridDim, blockDim, 0, streams[i]>>>(
-            d_file_data + offset, size, offset, 
-            d_chunk_results + chunk_result_offset, 
-            d_chunk_counts + chunk_count_offset
-        );
-    }
-    cudaDeviceSynchronize();
-    cudaEventRecord(kernel_stop);
-    
-    // 결과 복사
-    cudaMemcpy(h_chunk_results, d_chunk_results, 
-               sizeof(ChunkResult) * TOTAL_CHUNKS_NEEDED, 
-               cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_chunk_counts, d_chunk_counts, 
-               sizeof(int) * TOTAL_BLOCKS_NEEDED, 
-               cudaMemcpyDeviceToHost);
-    
-    cudaEventRecord(stop);
-    
-    // 🔍 성능 분석
-    float total_time, memcpy_time, kernel_time;
-    cudaEventElapsedTime(&total_time, start, stop);
-    cudaEventElapsedTime(&memcpy_time, memcpy_start, memcpy_stop);
-    cudaEventElapsedTime(&kernel_time, kernel_start, kernel_stop);
-    
-    std::cout << "\n=== 상세 성능 분석 ===" << std::endl;
-    std::cout << "총 처리 시간: " << total_time << " ms" << std::endl;
-    std::cout << "메모리 복사 시간: " << memcpy_time << " ms (" 
-              << (memcpy_time/total_time)*100 << "%)" << std::endl;
-    std::cout << "커널 실행 시간: " << kernel_time << " ms (" 
-              << (kernel_time/total_time)*100 << "%)" << std::endl;
-    
-    // 메모리 대역폭 계산
-    float bandwidth_gb_s = (FILE_SIZE * 2) / (memcpy_time / 1000.0) / (1024*1024*1024);
-    std::cout << "메모리 대역폭: " << bandwidth_gb_s << " GB/s" << std::endl;
-    
-    // 처리 속도 계산
-    float throughput_mb_s = (FILE_SIZE / (1024*1024)) / (kernel_time / 1000.0);
-    std::cout << "처리 속도: " << throughput_mb_s << " MB/s" << std::endl;
-    
-    // 🔍 청크 크기 분포 분석
-    std::map<size_t, int> size_distribution;
-    int total_chunks = 0;
-    size_t min_chunk = SIZE_MAX, max_chunk = 0;
-    
-    for (int i = 0; i < TOTAL_CHUNKS_NEEDED; i++) {
-        if (h_chunk_results[i].valid && h_chunk_results[i].size > 0) {
-            size_t size = h_chunk_results[i].size;
-            size_distribution[size]++;
-            total_chunks++;
-            min_chunk = std::min(min_chunk, size);
-            max_chunk = std::max(max_chunk, size);
+    std::vector<ChunkResult> all_chunk_results;
+
+    for (int seg_id = 0; seg_id < NUM_STREAMS + BUFFER_COUNT - 1; ++seg_id) {
+        int read_seg_id = seg_id;
+        int process_seg_id = seg_id - BUFFER_COUNT + 1;
+
+        if (read_seg_id < NUM_STREAMS) {
+            size_t offset = SEGMENT_SIZE * read_seg_id;
+            size_t segment_size = (read_seg_id == NUM_STREAMS - 1) ?
+                (FILE_SIZE - offset) : SEGMENT_SIZE;
+            
+            // 비동기 파일 읽기 시뮬레이션 (실제로는 동기식이지만 GPU 작업과 오버랩)
+            lseek(fd, offset, SEEK_SET);
+            size_t total_read = 0;
+            while (total_read < segment_size) {
+                ssize_t bytes_read = read(fd, 
+                                        h_pinned_buffers[current_buffer] + total_read, 
+                                        segment_size - total_read);
+                if (bytes_read <= 0) break;
+                total_read += bytes_read;
+            }
+            
+            // 🚀 STAGE 2: GPU로 전송 + 커널 실행 (비동기)
+            cudaMemcpyAsync(d_segment_buffers[current_buffer], 
+                           h_pinned_buffers[current_buffer], 
+                           segment_size, 
+                           cudaMemcpyHostToDevice, 
+                           streams[current_buffer]
+            );
+            dim3 blockDim(THREADS_PER_BLOCK);
+            dim3 gridDim(NUM_BLOCKS);
+
+            rabin_kernel_fixed<<<gridDim, blockDim, 0, streams[current_buffer]>>>(
+                d_segment_buffers[current_buffer], segment_size, offset,
+                d_chunk_results[current_buffer]
+            );
+
+            // 결과 복사 (비동기)
+            cudaMemcpyAsync(h_chunk_results[current_buffer], 
+                           d_chunk_results[current_buffer],
+                           sizeof(ChunkResult) * CHUNKS_PER_STREAM, 
+                           cudaMemcpyDeviceToHost, 
+                           streams[current_buffer]
+            );
+
+            // 이 버퍼의 작업 완료를 표시
+            cudaEventRecord(events[current_buffer], streams[current_buffer]);
+
         }
+
+        // 이전 버퍼의 결과 처리 (CPU)
+        if (process_seg_id >= 0) {
+            int process_buffer = (current_buffer + 1) % BUFFER_COUNT;
+            
+            // 이전 버퍼의 GPU 작업이 완료될 때까지 대기
+            cudaEventSynchronize(events[process_buffer]);
+            
+            // 결과 수집 (CPU 작업, 다음 GPU 작업과 오버랩)
+            for (int i = 0; i < CHUNKS_PER_STREAM; i++) {
+                if (h_chunk_results[process_buffer][i].valid && 
+                    h_chunk_results[process_buffer][i].size > 0) {
+                    all_chunk_results.push_back(h_chunk_results[process_buffer][i]);
+                    
+                    const char* ip = "127.0.0.1";
+                    int port = 8080 + (process_seg_id % 4);
+                    write_chunk_map(h_chunk_results[process_buffer][i].chunk_id, 
+                                  ip, port, metadata_path);
+                }
+            }
+            
+        }
+        // 버퍼 전환
+        current_buffer = (current_buffer + 1) % BUFFER_COUNT;
     }
+
+    close(fd);
+    finish_chunk_map();
     
-    std::cout << "\n=== 청크 크기 분석 ===" << std::endl;
-    std::cout << "총 청크 수: " << total_chunks << std::endl;
-    std::cout << "최소 청크 크기: " << min_chunk << " bytes" << std::endl;
-    std::cout << "최대 청크 크기: " << max_chunk << " bytes" << std::endl;
-    std::cout << "평균 청크 크기: " << FILE_SIZE / total_chunks << " bytes" << std::endl;
+    // 성능 측정
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float total_time;
+    cudaEventElapsedTime(&total_time, start, stop);
     
-    // 크기별 분포 (상위 5개)
-    std::cout << "크기별 분포 (상위 5개):" << std::endl;
-    auto it = size_distribution.rbegin();
-    for (int i = 0; i < 5 && it != size_distribution.rend(); ++it, ++i) {
-        std::cout << "  " << it->first << " bytes: " << it->second << "개 ("
-                  << (double)it->second/total_chunks*100 << "%)" << std::endl;
-    }
-    
-    // 🚨 문제 진단
-    if (max_chunk == MAX_CHUNK_SIZE) {
-        std::cout << "\n⚠️  경고: 모든 청크가 최대 크기로 분할됨" << std::endl;
-        std::cout << "   → Rabin 핑거프린팅이 작동하지 않을 가능성" << std::endl;
-        std::cout << "   → 윈도우 초기화 또는 해시 계산 문제 의심" << std::endl;
-    }
-    
-    // GPU 사용률 진단
-    if (kernel_time < memcpy_time * 0.5) {
-        std::cout << "\n💡 최적화 제안: 커널이 메모리 복사보다 너무 빠름" << std::endl;
-        std::cout << "   → 더 복잡한 작업을 GPU에서 처리할 수 있음" << std::endl;
-        std::cout << "   → 청크 검증, 압축 등 추가 작업 고려" << std::endl;
-    }
+    std::cout << "\n=== 파이프라인 처리 결과 ===" << std::endl;
+    std::cout << "총 처리 시간: " << total_time << " ms" << std::endl;
+    std::cout << "총 청크 수: " << all_chunk_results.size() << std::endl;
+    std::cout << "처리 속도: " << (FILE_SIZE / (1024*1024)) / (total_time / 1000) 
+              << " MB/s" << std::endl;
     
     // 정리
-    for (int i = 0; i < NUM_STREAMS; i++) {
+    for (int i = 0; i < BUFFER_COUNT; i++) {
+        cudaFreeHost(h_pinned_buffers[i]);
+        cudaFreeHost(h_chunk_results[i]);
+        cudaFree(d_segment_buffers[i]);
+        cudaFree(d_chunk_results[i]);
         cudaStreamDestroy(streams[i]);
+        cudaEventDestroy(events[i]);
     }
-    
-    cudaFree(d_file_data);
-    cudaFree(d_chunk_results);
-    cudaFree(d_chunk_counts);
-    free(h_chunk_results);
-    free(h_chunk_counts);
-    munmap(mapped_file, FILE_SIZE);
-    close(fd);
     
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-    cudaEventDestroy(kernel_start);
-    cudaEventDestroy(kernel_stop);
-    cudaEventDestroy(memcpy_start);
-    cudaEventDestroy(memcpy_stop);
 }
