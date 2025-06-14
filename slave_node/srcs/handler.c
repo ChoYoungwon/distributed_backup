@@ -38,10 +38,10 @@ void send_file(int client_socket) {
     }
 
     fseek(fp, 0, SEEK_END);
-    uint32_t chunk_size = ftell(fp);
+    uint64_t chunk_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
-    uint32_t chunk_size_net = htonl(chunk_size);
+    uint64_t chunk_size_net = htonl(chunk_size);
     if (send(client_socket, &chunk_size_net, sizeof(chunk_size_net), 0) != sizeof(chunk_size_net)) {
         perror("failed to send chunk size");
         fclose(fp);
@@ -68,12 +68,12 @@ void receive_file(int client_socket) {
         return;
     }
 
-    uint32_t chunk_size_net;
+    uint64_t chunk_size_net;
     if (read_exact(client_socket, &chunk_size_net, sizeof(chunk_size_net)) <= 0) {
         perror("failed to read chunk size");
         return;
     }
-    uint32_t chunk_size = ntohl(chunk_size_net);
+    uint64_t chunk_size = ntohl(chunk_size_net);
 
     mkdir("chunks", 0755);
 

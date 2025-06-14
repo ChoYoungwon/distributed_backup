@@ -22,7 +22,7 @@ typedef struct {
     char chunk_id[65];
     char node_ip[32];
     int node_port;
-    long offset;
+    uint64_t offset;
 } ChunkInfo;
 
 static ChunkInfo chunk_infos[MAX_CHUNKS];
@@ -63,7 +63,7 @@ void rabin_init_tables() {
     }
 }
 
-void parrel_write_chunk_map(const char *chunk_id, const char *ip, int port, long offset) {
+void parrel_write_chunk_map(const char *chunk_id, const char *ip, int port, uint64_t offset) {
     #pragma omp critical
     {
         if (chunk_info_count < MAX_CHUNKS) {
@@ -84,7 +84,7 @@ void parrel_finish_chunk_map(const char *metadata_path) {
     }
     fprintf(fp, "[\n");
     for (int i = 0; i < chunk_info_count; i++) {
-        fprintf(fp, "  {\"chunk_id\": \"%s\", \"offset\": %ld, \"node\": \"%s:%d\"}%s\n",
+        fprintf(fp, "  {\"chunk_id\": \"%s\", \"offset\": %zu, \"node\": \"%s:%d\"}%s\n",
                 chunk_infos[i].chunk_id,
                 chunk_infos[i].offset,
                 chunk_infos[i].node_ip,
@@ -194,7 +194,7 @@ void parrel_chunk_and_process(const char *filepath, const char *metadata_path) {
                 sprintf(chunk_id + j * 2, "%02x", sha[j]);
             chunk_id[64] = '\0';
 
-            long offset = end - chunk_size;
+            uint64_t offset = end - chunk_size;
             int target_index;
             #pragma omp critical
             {

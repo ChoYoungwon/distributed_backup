@@ -35,7 +35,7 @@ typedef struct __align__(16) {
     uint8_t padding[7];
 } ChunkResult;
 
-void write_chunk_map(const char *chunk_id, const int offset,const char *ip, int port, const char *metadata_path) {
+void write_chunk_map(const char *chunk_id, const uint64_t offset,const char *ip, int port, const char *metadata_path) {
     if (map_fp == NULL) {
         map_fp = fopen(metadata_path, "w");
         fprintf(map_fp, "[\n");
@@ -46,7 +46,7 @@ void write_chunk_map(const char *chunk_id, const int offset,const char *ip, int 
         fprintf(map_fp, ",\n");
     }
 
-    fprintf(map_fp, "  {\"chunk_id\": \"%s\", \"offset\": %d, \"node\": \"%s:%d\"}", chunk_id, offset, ip, port);
+    fprintf(map_fp, "  {\"chunk_id\": \"%s\", \"offset\": %zu, \"node\": \"%s:%d\"}", chunk_id, offset, ip, port);
     chunk_count++;
     fflush(map_fp);
 }
@@ -188,7 +188,6 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
             if (chunk_size <= WINDOW_SIZE) {
                 slide_window[local_thread_id][chunk_size - 1] = b;
                 if (chunk_size == WINDOW_SIZE) {
-                    // 🔧 수정: 정확한 초기 핑거프린트 계산
                     fingerprint = 0;
                     for (int i = 0; i < WINDOW_SIZE; i++) {
                         fingerprint = (fingerprint << 8) ^ d_rabin_table[(fingerprint >> 56) ^ slide_window[local_thread_id][i]];
@@ -264,7 +263,7 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     }
     
     const size_t FILE_SIZE = st.st_size;
-    const size_t SEGMENT_SIZE = FILE_SIZE / NUM_STREAMS;
+    const size_t SEGMENT_SIZE = FILE_SIZE / NUM_SEGMENT;
     
     std::cout << "=== 파이프라인 스트리밍 처리 ===" << std::endl;
     std::cout << "파일 크기: " << FILE_SIZE / (1024*1024) << " MB" << std::endl;
@@ -288,7 +287,7 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     
     // 버퍼 초기화
     for (int i = 0; i < BUFFER_COUNT; i++) {
-        size_t max_segment_size = SEGMENT_SIZE + (FILE_SIZE % NUM_STREAMS);
+        size_t max_segment_size = SEGMENT_SIZE + (FILE_SIZE % NUM_SEGMENT);
         
         cudaMallocHost(&h_pinned_buffers[i], max_segment_size);
         cudaMalloc(&d_segment_buffers[i], max_segment_size);
@@ -301,25 +300,25 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     
 //std::vector<ChunkResult> all_chunk_results;
 
-    size_t segment_offsets[NUM_STREAMS] = {0};  // 안전하게 확보
+    size_t segment_offsets[NUM_SEGMENT] = {0};
     bool cpu_processing_done[BUFFER_COUNT] = {0};
     for (int i = 0; i < BUFFER_COUNT; i++) {
         cpu_processing_done[i] = true;
     }
 
 
-    for (int seg_id = 0; seg_id < NUM_STREAMS + BUFFER_COUNT - 1; ++seg_id) {
+    for (int seg_id = 0; seg_id < NUM_SEGMENT + BUFFER_COUNT - 1; ++seg_id) {
         int read_seg_id = seg_id;
         int process_seg_id = seg_id - BUFFER_COUNT + 1;
 
-        if (read_seg_id < NUM_STREAMS) {
+        if (read_seg_id < NUM_SEGMENT) {
             size_t offset = SEGMENT_SIZE * read_seg_id;
-            size_t segment_size = (read_seg_id == NUM_STREAMS - 1) ?
+            size_t segment_size = (read_seg_id == NUM_SEGMENT - 1) ?
                 (FILE_SIZE - offset) : SEGMENT_SIZE;
             
             segment_offsets[read_seg_id] = offset;
 
-            // 비동기 파일 읽기 시뮬레이션 (실제로는 동기식이지만 GPU 작업과 오버랩)
+            // 일부만 파일 읽기
             lseek(fd, offset, SEEK_SET);
             size_t total_read = 0;
             while (total_read < segment_size) {
@@ -329,8 +328,8 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                 if (bytes_read <= 0) break;
                 total_read += bytes_read;
             }
-            
-            // STAGE 2: GPU로 전송 + 커널 실행 (비동기)
+
+
             cudaMemcpyAsync(d_segment_buffers[current_buffer], 
                            h_pinned_buffers[current_buffer], 
                            segment_size, 
@@ -345,14 +344,14 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                 d_chunk_results[current_buffer]
             );
 
-            // 현재 current_buffer가 이미 CPU 전송 중이면 GPU에 안 넘겨야 함
+            // 현재 current_buffer가 이미 CPU 전송 중이면 GPU에 안 넘겨야 함. 그래서 막기인데
+            // 이러면 시스템 콜 걸어서 안좋긴 한데.. 
             if (!cpu_processing_done[current_buffer]) {
                 while (!cpu_processing_done[current_buffer]) {
                     usleep(100);
                 }
             }
 
-            // 결과 복사 (비동기)
             cudaMemcpyAsync(h_chunk_results[current_buffer], 
                            d_chunk_results[current_buffer],
                            sizeof(ChunkResult) * CHUNKS_PER_STREAM, 
@@ -360,7 +359,6 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                            streams[current_buffer]
             );
             
-            // 이 버퍼의 작업 완료를 표시
             cudaEventRecord(events[current_buffer], streams[current_buffer]);
         }
 
@@ -378,7 +376,7 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                 fprintf(stderr, "CUDA kernel error: %s\n", cudaGetErrorString(err));
             }
             
-            // 결과 수집 (CPU 작업, 다음 GPU 작업과 오버랩)
+            // 결과 받은거로 메타 데이터 기록과 전송 (GPU 작업과 오버랩)
             cpu_processing_done[process_buffer] = false;
             #pragma omp parallel num_threads(MAX_THREADS)
             {
@@ -404,7 +402,6 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                         int thread_id = omp_get_thread_num();
                         int sockfd = sockfds[target][thread_id % MAX_THREADS];  // 소켓 연결 배열
 
-                        // 안전 전송
                         if (send_chunk_over_connection(sockfd, chunk_id, chunk_buf, chunk_size) == 0) {
                             #pragma omp critical  // metadata 파일 쓰기 충돌 방지
                             write_chunk_map(chunk_id, global_offset, node_ips[target], node_ports[target], metadata_path);

@@ -73,7 +73,7 @@ int send_chunk_over_connection(int sockfd, const char *chunk_id, const uint8_t *
         return -1;
     }
 
-    uint32_t chunk_size = htonl((uint32_t)size);
+    uint64_t chunk_size = htonl((uint64_t)size);
     if (send(sockfd, &chunk_size, sizeof(chunk_size), 0) != sizeof(chunk_size)) {
         int err = errno;
         fprintf(stderr, "Send failed 3: %s\n", strerror(err));

@@ -62,7 +62,7 @@ int recv_chunk(int sockfd, const char *chunk_id, uint8_t **chunk_data, size_t *c
     if (send(sockfd, "SEND", 4, 0) != 4) return -1;
     if (send(sockfd, chunk_id, 64, 0) != 64) return -1;
 
-    uint32_t chunk_size_net;
+    uint64_t chunk_size_net;
     if (recv(sockfd, &chunk_size_net, sizeof(chunk_size_net), 0) != sizeof(chunk_size_net)) {
         perror("recv chunk size");
         return -1;

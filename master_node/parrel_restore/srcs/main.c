@@ -13,7 +13,7 @@ typedef struct {
     char chunk_id[65];
     char ip[64];
     int port;
-    long offset;
+    uint64_t offset;
 } ChunkEntry;
 
 int main(int argc, char *argv[]) {
@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
         json_t *offset_json = json_object_get(entry, "offset");
         if (!chunk_id || !node || !json_is_integer(offset_json)) continue;
 
-        long offset = json_integer_value(offset_json);
+        uint64_t offset = (uint64_t)json_integer_value(offset_json);
         char ip[64];
         int port;
         sscanf(node, "%63[^:]:%d", ip, &port);
