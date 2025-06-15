@@ -165,7 +165,7 @@ void parrel_chunk_and_process(const char *filepath, const char *metadata_path) {
                     sprintf(chunk_id + j * 2, "%02x", sha[j]);
                 chunk_id[64] = '\0';
 
-                long offset = i - chunk_size + 1;
+                uint64_t offset = i - chunk_size + 1;
                 int target_index;
                 #pragma omp critical
                 {

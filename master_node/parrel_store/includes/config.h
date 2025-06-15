@@ -14,7 +14,7 @@
 #define WINDOW_SIZE     48
 #define CHUNK_REGION (512 * 1024)
 #define POLY            0x3DA3358B4DC173ULL
-#define MAX_CHUNKS 100000
+#define MAX_CHUNKS 1000000
 
 extern const char *node_ips[MAX_NODES];
 extern int node_ports[MAX_NODES];

@@ -247,11 +247,6 @@ __global__ void rabin_kernel_fixed(uint8_t* file_data, size_t data_size, size_t 
 }
 
 void chunk_and_process(const char *filepath, const char *metadata_path) {
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-
     if (open_all_connections(MAX_THREADS)) {
         return;
     }
@@ -264,10 +259,7 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     
     const size_t FILE_SIZE = st.st_size;
     const size_t SEGMENT_SIZE = FILE_SIZE / NUM_SEGMENT;
-    
-    std::cout << "=== 파이프라인 스트리밍 처리 ===" << std::endl;
-    std::cout << "파일 크기: " << FILE_SIZE / (1024*1024) << " MB" << std::endl;
-    std::cout << "세그먼트 크기: " << SEGMENT_SIZE / (1024*1024) << " MB" << std::endl;
+
     int fd = open(filepath, O_RDONLY);
     if (fd == -1) {
         perror("open failed");
@@ -426,15 +418,6 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
     close(fd);
     
     // 성능 측정
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    float total_time;
-    cudaEventElapsedTime(&total_time, start, stop);
-    
-    std::cout << "\n=== 파이프라인 처리 결과 ===" << std::endl;
-    std::cout << "총 처리 시간: " << total_time << " ms" << std::endl;
-    
-    // 정리
     for (int i = 0; i < BUFFER_COUNT; i++) {
         cudaFreeHost(h_pinned_buffers[i]);
         cudaFreeHost(h_chunk_results[i]);
@@ -443,8 +426,5 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
         cudaStreamDestroy(streams[i]);
         cudaEventDestroy(events[i]);
     }
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
     close_all_connections(MAX_THREADS);
 }

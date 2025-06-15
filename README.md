@@ -104,6 +104,15 @@ docker-compose up --build
 ### 2. 마스터 노드 컨테이너에 접속합니다
 ```bash
 docker exec -it master_node /bin/bash
+
+dd if=/dev/urandom of=data_1000.bin bs=1M count=1000
+dd if=/dev/urandom of=data_2000.bin bs=1M count=2000
+dd if=/dev/urandom of=data_3000.bin bs=1M count=3000
+dd if=/dev/urandom of=data_4000.bin bs=1M count=4000
+dd if=/dev/urandom of=data_5000.bin bs=1M count=5000
+
+dd if=/dev/urandom of=data_10000.bin bs=1M count=10000
+dd if=/dev/urandom of=data_20000.bin bs=1M count=20000
 ```
 
 ### 3. 일괄 성능 비교 분석을 수행합니다 (Benchmark 실행)
@@ -117,6 +126,8 @@ python3 restore_benchmark.py
 docker cp master_node:/usr/src/app/store_benchmark_results.csv ./store_benchmark_results.csv
 docker cp master_node:/usr/src/app/restore_benchmark_results.csv ./restore_benchmark_results.csv
 ```
+
+ifstat -t
 
 ## 실험 결과
 

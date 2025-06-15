@@ -60,7 +60,7 @@ int send_chunk_over_connection(int sockfd, const char *chunk_id, const uint8_t *
     if (send(sockfd, chunk_id, 64, 0) != 64)
         return -1;
 
-    uint32_t chunk_size = htonl((uint32_t)size);
+    uint64_t chunk_size = htonl((uint64_t)size);
     if (send(sockfd, &chunk_size, sizeof(chunk_size), 0) != sizeof(chunk_size))
         return -1;
     size_t sent = 0;

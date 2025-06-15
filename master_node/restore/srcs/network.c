@@ -38,12 +38,12 @@ int send_chunk_request(int sockfd, const char *chunk_id, FILE *out_fp) {
     if (send(sockfd, chunk_id, 64, 0) != 64) return -1;
 
     // 2. chunk 크기 수신
-    uint32_t chunk_size_net;
+    uint64_t chunk_size_net;
     if (recv(sockfd, &chunk_size_net, sizeof(chunk_size_net), 0) != sizeof(chunk_size_net)) {
         perror("recv chunk size");
         return -1;
     }
-    uint32_t chunk_size = ntohl(chunk_size_net);
+    uint64_t chunk_size = ntohl(chunk_size_net);
 
     // 3. chunk_size 만큼 정확히 받기
     char buffer[BUF_SIZE];

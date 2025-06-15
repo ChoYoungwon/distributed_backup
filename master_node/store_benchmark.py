@@ -17,19 +17,19 @@ def run_and_time(cmd):
     return elapsed
 
 def benchmark():
-    sizes = [100, 500, 1000, 2000, 3000, 5000, 10000]
+    sizes = [10000, 20000]  # Sizes in KB
     nodes = ["172.28.0.11", "9001", "172.28.0.12", "9001", "172.28.0.13", "9001"]
     results = []
 
     for size in sizes:
         print(f"\n=== [TEST] File Size: {size}MB ===")
         original = f"data_{size}.bin"
-        #serial_map = f"serial_chunk_map_{size}.json"
+        serial_map = f"serial_chunk_map_{size}.json"
         parrel_map = f"parrel_chunk_map_{size}.json"
         cuda_map = f"cuda_chunk_map_{size}.json"
 
         # Serial Store
-        #t1 = run_and_time(["./store", original, serial_map] + nodes)
+        t1 = run_and_time(["./store", original, serial_map] + nodes)
 
         # Parallel Store
         t2 = run_and_time(["./parrel_store", original, parrel_map] + nodes)
@@ -39,7 +39,7 @@ def benchmark():
 
         results.append({
             "file_size_kb": size,
-            #"serial_store_time": t1,
+            "serial_store_time": t1,
             "parrel_store_time": t2,
             "cuda_store_time": t3,
         })
@@ -52,7 +52,7 @@ def benchmark():
         for row in results:
             writer.writerow(row)
 
-    print(f"\n✅ Store benchmark results saved to {csv_path}")
+    print(f"\nStore benchmark results saved to {csv_path}")
 
 if __name__ == "__main__":
     benchmark()
