@@ -104,7 +104,10 @@ docker-compose up --build
 ### 2. 마스터 노드 컨테이너에 접속합니다
 ```bash
 docker exec -it master_node /bin/bash
+```
 
+### 3. 실험용 데이터를 생성합니다
+```bash
 dd if=/dev/urandom of=data_1000.bin bs=1M count=1000
 dd if=/dev/urandom of=data_2000.bin bs=1M count=2000
 dd if=/dev/urandom of=data_3000.bin bs=1M count=3000
@@ -112,16 +115,15 @@ dd if=/dev/urandom of=data_4000.bin bs=1M count=4000
 dd if=/dev/urandom of=data_5000.bin bs=1M count=5000
 
 dd if=/dev/urandom of=data_10000.bin bs=1M count=10000
-dd if=/dev/urandom of=data_20000.bin bs=1M count=20000
 ```
 
-### 3. 일괄 성능 비교 분석을 수행합니다 (Benchmark 실행)
+### 4. 일괄 성능 비교 분석을 수행합니다
 ```bash
 python3 store_benchmark.py
 python3 restore_benchmark.py
 ```
 
-### 4. 결과 CSV 파일을 확인하기 위해 로컬로 복사합니다
+### 5. 결과 CSV 파일을 확인하기 위해 로컬로 복사합니다
 ```bash
 docker cp master_node:/usr/src/app/store_benchmark_results.csv ./store_benchmark_results.csv
 docker cp master_node:/usr/src/app/restore_benchmark_results.csv ./restore_benchmark_results.csv
@@ -129,7 +131,7 @@ docker cp master_node:/usr/src/app/restore_benchmark_results.csv ./restore_bench
 
 ifstat -t
 
-## 실험 결과
+## 실험 결과 (SingleCore vs MultiCore)
 
 ### 컬럼
 - threads: 사용한 OpenMP 쓰레드 수
@@ -139,7 +141,7 @@ ifstat -t
 - speedup: 속도 향상 배수 (Speedup = Serial Time / Parallel Time)
 - efficiency: 병렬 효율성 (Efficiency = Speedup / Threads × 100%)
 
-### 분석표
+### 결과표
 | **threads** | **file_size_mb** | **serial_time**   | **parallel_time** | **speedup**        | **efficiency**     |
 | ----------- | ---------------- | ----------------- | ----------------- | ------------------ | ------------------ |
 | **2**       | 100              | 0.936583995819092 | 0.643244981765747 | 1.4560300078021800 | 72.80150039010890  |
@@ -207,8 +209,73 @@ ifstat -t
 
 특히, 자원 경합의 문제가 4 ~ 5개의 쓰레드를 넘어가면 심각하게 발생하는 것을 알 수 있음.
 
+## 실험 결과 (SingleCore vs MultiCore vs GPU)
+
+### 결과표
+![alt text](image.png)
+
+### 그래프 분석
+![alt text](image-1.png)
+
+#### 분석
+1. 단순 시간 분석
+Serial : 가장 기울기가 가파르게 증가 → 선형 이상 증가, 큰 파일에 매우 비효율적
+Parallel : 성능이 우수하지만, 파일 크기 커질수록 처리 시간이 느려지는 경향 (성능 한계 도달)
+CUDA : 초기에는 병렬보다 느리거나 비슷하지만, 파일 크기가 커질수록 가장 빠른 방식이 됨
+
+2. 속도 향상 비율 분석 (Serial 코드 대비)
+Parallel Speedup:
+약 2.3~3.6배 빠름
+파일 크기가 커질수록 점점 속도 향상 폭이 일정해지며 제한됨
+
+CUDA Speedup:
+최대 4.5배 이상 빠름
+성능 향상이 초기에 급격히 증가, 이후 약간 감소하다가 20,000KB 구간에서 다시 상승
+
+#### 결론
+
+작은 파일에서는 병렬이 CUDA보다 빠를 수 있으나, 큰 파일에서는 CUDA가 가장 효율적임
+CUDA 기반 저장은 특히 대용량 파일 처리 시 성능 확장성이 우수함.
+병렬 저장은 CPU 기반 병렬화의 한계로 인해 확장성은 제한적임.
+
+## 네트워크 및 파일 IO 분석
+
+### 네트워크 (ifstat -t)
+![alt text](image-6.png)
+
+- 그래프 구성
+X축(Time): 시간 흐름 (14:09:07 ~ 14:09:19)
+Y축(MB/s): 초당 데이터 전송량 (단위: 메가바이트)
+주황색 선 (Outbound): 외부로 나가는 네트워크 트래픽
+노란색 점선 (Inbound): 내부로 들어오는 네트워크 트래픽
+
+- 해석 요점
+초기 급상승 (14:09:08):
+외부로 나가는 트래픽이 1800MB/s 이상으로 급증하며 피크를 찍음.
+이는 아마도 GPU 처리가 완료된 청크를 OpenMP 스레드를 통해 병렬로 전송하기 시작한 시점으로 해석됩니다.
+스파이크와 낙폭 반복 (14:09:09~14:09:17):
+Outbound 트래픽이 급격히 떨어졌다가 다시 상승하는 패턴을 보임.
+이는 버퍼 전환 주기와 CUDA 커널 + 전송 연계 처리로 발생한 것으로 보입니다.
+Inbound는 거의 0에 수렴하여 다운로드가 아닌 업로드 중심 구조임을 확인할 수 있습니다.
+
+트래픽 종료 (14:09:18 이후):
+Outbound가 0으로 떨어지며 전송이 완료된 것으로 보임.
+타이밍 상으로 cuda_restored_data.bin 생성 후의 순간과 일치할 수 있습니다.
+
+- 종합 평가
+이 그래프는 CUDA 커널 실행 및 청크 전송의 병렬 구조가 실제로 네트워크에 부하를 어떻게 주는지, 시간별 처리량이 어떻게 변화하는지를 잘 보여줍니다. 특히 초반의 순간 최대 대역폭이 매우 높고, 이후 안정적으로 유지되다 점차 줄어드는 형태는 병렬 처리 + 이중 버퍼 구조가 실질적으로 성능 향상에 기여하고 있음을 시사합니다.
 
 
+
+### 디스크 IO
+#### single core
+![alt text](image-3.png)
+
+#### multi core
+![alt text](image-4.png)
+
+#### gpu
+![alt text](image-5.png)
 
 ## 참고 문헌
 - A Low-bandwidth Network File System (LBFS)

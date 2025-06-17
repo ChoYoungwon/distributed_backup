@@ -328,13 +328,6 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                            cudaMemcpyHostToDevice, 
                            streams[current_buffer]
             );
-            dim3 blockDim(THREADS_PER_BLOCK);
-            dim3 gridDim(NUM_BLOCKS);
-
-            rabin_kernel_fixed<<<gridDim, blockDim, 0, streams[current_buffer]>>>(
-                d_segment_buffers[current_buffer], segment_size, offset,
-                d_chunk_results[current_buffer]
-            );
 
             // 현재 current_buffer가 이미 CPU 전송 중이면 GPU에 안 넘겨야 함. 그래서 막기인데
             // 이러면 시스템 콜 걸어서 안좋긴 한데.. 
@@ -343,6 +336,14 @@ void chunk_and_process(const char *filepath, const char *metadata_path) {
                     usleep(100);
                 }
             }
+            
+            dim3 blockDim(THREADS_PER_BLOCK);
+            dim3 gridDim(NUM_BLOCKS);
+
+            rabin_kernel_fixed<<<gridDim, blockDim, 0, streams[current_buffer]>>>(
+                d_segment_buffers[current_buffer], segment_size, offset,
+                d_chunk_results[current_buffer]
+            );
 
             cudaMemcpyAsync(h_chunk_results[current_buffer], 
                            d_chunk_results[current_buffer],

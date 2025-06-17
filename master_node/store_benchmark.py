@@ -17,7 +17,7 @@ def run_and_time(cmd):
     return elapsed
 
 def benchmark():
-    sizes = [10000, 20000]  # Sizes in KB
+    sizes = [1000, 2000, 3000, 4000, 5000]  # Sizes in KB
     nodes = ["172.28.0.11", "9001", "172.28.0.12", "9001", "172.28.0.13", "9001"]
     results = []
 
